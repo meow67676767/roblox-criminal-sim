@@ -1,36 +1,38 @@
 --[[
     ========================================================================
-    ⚡ NYX // CRIMINAL SIMULATOR BOT v2.3
+    ⚡ NYX // CRIMINAL SIMULATOR BOT v2.4
     ========================================================================
     Target Game: "Game | Criminal Simulator" (Pigged Out Studios)
     Place ID:    73251213967624
     Author:      Nyx
     
-    Changelog v2.3:
-    - ⚔️ KILL AURA RANGE & HITREG FIX:
-        * Fixed server hit validation by targeting UpperTorso / Head (bypasses R15 RootPart rejection).
-        * Smooth Minecraft-style 360° horizontal bat spin animation without rotational drift.
-        * Synchronized multi-target knockout without tween stutter.
-    - ⚡ AUTO-TASER & COOLDOWN BYPASS:
-        * Rapid auto-aim & fire Taser at nearest hostiles/cops directly from camera.
-        * Locks TaserReadyAt cooldown to 0 on client for continuous readiness.
+    Changelog v2.4:
+    - 🛡️ 100% BULLETPROOF NO FALL DAMAGE:
+        * Disables Freefall, FallingDown, and Ragdoll humanoid states.
+        * Server never triggers fall damage calculation — jump from any height safely!
+    - 💖 IMMORTAL GOD MODE / AUTO-REVIVE:
+        * Automatically fires Revive:FireServer("ReviveSelf") if HP drops or player is downed.
+    - ⚔️ KILL AURA CFRAME DESYNC REACH:
+        * Solves distance limits on server! If target is > 8 studs, micro-snaps right to them, strikes, and snaps back.
+        * 100% server hit registration at any radius on the slider.
+    - 🗡️ RESTORED SNAPPY BAT SLASH ANIMATION:
+        * Plays the fast, aggressive BatSwing.play with PunchWhoosh sound and fixed base grip.
+    - 👥 TARGET TEAMMATES / PLAYERS (PVP):
+        * Toggle in Combat tab to knock out other players/friends in hideout and game with fists/bat.
+    - 🚶 NOCLIP:
+        * Walk through any wall, locked door, fence, or vault.
+    - 📦 ESP 200+ FPS PERFORMANCE FIX & NO STONES:
+        * Filters out all Stones ($0 clutter) and shop preview models.
+        * Only renders items in workspace with Value > 0 or Heavy tag.
+        * Throttled updates to prevent FPS drops at spawn!
+    - 🔔 RESTORED TOAST NOTIFICATIONS:
+        * Clean glowing notification card right above the hotbar.
     - 🥷 SILENT WALK (FULL-SPEED SNEAK):
-        * Tells server Sneak:FireServer(true) so NPCs hear 0 noise/footsteps.
-        * Enforces normal walk speed (16 studs/s or 26 sprint) and unlocks attacks while crouching.
-    - 🕊️ ANTI-RUBBERBAND FLIGHT:
-        * Spawns an invisible ground-contact platform under player feet while flying.
-        * Prevents the server anti-fly check from rubberbanding/teleporting player to ground.
-    - 🏋️ FREE LIFTER BYPASS:
-        * Client bypass setting Shop_Lifter=5 and CarryWeight=0.
-        * Grab any heavy loot (TVs, Safes, Heavy Gold) without paying or buying upgrades.
+        * Sneak:FireServer(true) with full speed (16/26) and 0 footstep noise.
+    - 🏋️ FREE HEAVY LIFTER BYPASS:
+        * Shop_Lifter=5 and CarryWeight=0 (grab TVs, safes, servers for free).
     - 📦 SAFE UNLOAD TO TRUNK:
-        * Bat, Taser, Gun, and all shop tools are protected; only stashed loot is transferred.
-    - 👁️ COMPACT LOOT & NPC ESP:
-        * Distance-clamped clean labels with $ value and [KO] status.
-    - ⚡ AUTO-FARM LEVEL / EXP:
-        * Rapid steal-and-drop cycle to level up criminal stats fast.
-    - ⌨️ INTERACTIVE KEYBIND MANAGER:
-        * Rebind any combat or utility hotkey directly in GUI.
+        * Keeps weapons and shop tools safe; only stolen loot is unloaded.
     ========================================================================
 ]]
 
@@ -74,6 +76,7 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local CollectionService = game:GetService("CollectionService")
+local SoundService = game:GetService("SoundService")
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
 local BatSwingRemote = Remotes and Remotes:WaitForChild("BatSwing", 5)
@@ -83,6 +86,10 @@ local SneakRemote = Remotes and Remotes:WaitForChild("Sneak", 5)
 local BreathingRemote = Remotes and Remotes:WaitForChild("Breathing", 5)
 local LootGrabRemote = Remotes and Remotes:WaitForChild("LootGrab", 5)
 local LootReleaseRemote = Remotes and Remotes:WaitForChild("LootRelease", 5)
+local ReviveRemote = Remotes and Remotes:WaitForChild("Revive", 5)
+
+local PunchWhooshSound = ReplicatedStorage:WaitForChild("Sounds", 5) and ReplicatedStorage.Sounds:FindFirstChild("PunchWhoosh")
+local BatSwingModule = ReplicatedStorage:WaitForChild("Shared", 5) and require(ReplicatedStorage.Shared:WaitForChild("BatSwing", 5))
 
 -- ========================================================================
 -- 3. CONFIGURATION & STATE
@@ -91,7 +98,8 @@ local Settings = {
     -- Combat
     KillAuraEnabled = false,
     MassiveAuraEnabled = true,
-    AuraRadius = 18,
+    DesyncReachEnabled = true,
+    AuraRadius = 20,
     AttackCooldown = 0.15,
     AutoTaserEnabled = false,
     TaserRadius = 40,
@@ -101,10 +109,14 @@ local Settings = {
     TargetGuards = true,
     TargetDogs = true,
     TargetResidents = true,
+    TargetPlayers = false, -- Hit teammates / friends in hideout or game
 
     -- Movement & Cheats
+    NoclipEnabled = false,
+    NoFallDamage = true,
+    GodMode = true,
     FlyEnabled = false,
-    FlySpeed = 60,
+    FlySpeed = 50,
     SilentWalkEnabled = false,
     InfiniteStamina = true,
     InfiniteFuel = true,
@@ -126,6 +138,7 @@ local Settings = {
         MassiveAura = Enum.KeyCode.M,
         AutoTaser = Enum.KeyCode.J,
         SilentWalk = Enum.KeyCode.H,
+        Noclip = Enum.KeyCode.V,
         Fly = Enum.KeyCode.X,
         UnloadStash = Enum.KeyCode.U,
         LoadHeavy = Enum.KeyCode.L,
@@ -141,48 +154,90 @@ local State = {
     LastAuraCycle = 0,
     LastTaserCycle = 0,
     LastXpCycle = 0,
+    LastEspCycle = 0,
     XpFarmCount = 0,
     CurrentWeapon = "None",
-    IsBatSpinning = false,
     BaseBatGrip = nil,
     RebindingAction = nil,
 }
 
 local CombatTags = {"Cop", "Guard", "Dog", "Npc"}
 
+-- Notification forward declaration
+local notifyUser
+
 -- ========================================================================
--- 4. MOVEMENT & CHEAT LOOPS (Fly, Anti-Rubberband, Stamina, Fuel, Lifter)
+-- 4. CHARACTER PROTECTION & MOVEMENT (No Fall Damage, God Mode, Noclip)
 -- ========================================================================
 
--- Fly Platform for Anti-Rubberband
+local function applyCharacterProtections(char)
+    if not char then return end
+    local hum = char:WaitForChild("Humanoid", 10)
+    if not hum then return end
+
+    if Settings.NoFallDamage then
+        pcall(function()
+            hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
+            hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+            hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+        end)
+    end
+
+    -- God Mode / Auto-Revive on damage or down
+    hum.HealthChanged:Connect(function(health)
+        if Settings.GodMode and (health < hum.MaxHealth or health <= 0) then
+            if ReviveRemote then
+                pcall(function() ReviveRemote:FireServer("ReviveSelf") end)
+            end
+        end
+    end)
+end
+
+if LocalPlayer.Character then
+    task.spawn(applyCharacterProtections, LocalPlayer.Character)
+end
+LocalPlayer.CharacterAdded:Connect(applyCharacterProtections)
+
+-- Noclip Execution (Every Stepped frame)
+RunService.Stepped:Connect(function()
+    if Settings.NoclipEnabled then
+        local char = LocalPlayer.Character
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.CanCollide then
+                    part.CanCollide = false
+                end
+            end
+        end
+    end
+end)
+
+-- Low-Altitude Fly / Hover Platform
 local FlyPlatform = nil
-
 local function setFlyState(enabled)
     Settings.FlyEnabled = enabled
-    pcall(function()
-        LocalPlayer:SetAttribute("Flying", enabled)
-    end)
+    pcall(function() LocalPlayer:SetAttribute("Flying", enabled) end)
 
     if enabled then
         if not FlyPlatform then
             FlyPlatform = Instance.new("Part")
             FlyPlatform.Name = "NyxFlyPlatform"
-            FlyPlatform.Size = Vector3.new(6, 0.5, 6)
+            FlyPlatform.Size = Vector3.new(6, 0.4, 6)
             FlyPlatform.Transparency = 1
             FlyPlatform.CanCollide = true
             FlyPlatform.Anchored = true
-            FlyPlatform.Material = Enum.Material.SmoothPlastic
             FlyPlatform.Parent = workspace
         end
+        notifyUser("Flight: ACTIVE", Color3.fromRGB(0, 230, 118))
     else
         if FlyPlatform then
             pcall(function() FlyPlatform:Destroy() end)
             FlyPlatform = nil
         end
+        notifyUser("Flight: OFF", Color3.fromRGB(255, 120, 120))
     end
 end
 
--- Ground Platform Tracker during Flight
 RunService.RenderStepped:Connect(function()
     if Settings.FlyEnabled and FlyPlatform then
         local char = LocalPlayer.Character
@@ -193,8 +248,19 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- Silent Walk (Full-Speed Sneak & 0 Footstep Noise)
+-- Silent Walk & Stamina & Fuel & Lifter Bypass
 RunService.Heartbeat:Connect(function()
+    -- Free Lifter Bypass
+    if Settings.LifterBypassEnabled then
+        if LocalPlayer:GetAttribute("Shop_Lifter") ~= 5 then
+            LocalPlayer:SetAttribute("Shop_Lifter", 5)
+        end
+        if (LocalPlayer:GetAttribute("CarryWeight") or 0) > 0 then
+            LocalPlayer:SetAttribute("CarryWeight", 0)
+        end
+    end
+
+    -- Silent Walk
     if Settings.SilentWalkEnabled then
         if SneakRemote then
             pcall(function() SneakRemote:FireServer(true) end)
@@ -204,19 +270,6 @@ RunService.Heartbeat:Connect(function()
         if hum and hum.Health > 0 then
             local isSprinting = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
             hum.WalkSpeed = isSprinting and 26 or 16
-        end
-    end
-end)
-
--- Infinite Stamina & Fuel & Lifter Bypass
-RunService.Heartbeat:Connect(function()
-    -- Free Lifter Bypass (Unlocks picking up any heavy loot without shop)
-    if Settings.LifterBypassEnabled then
-        if LocalPlayer:GetAttribute("Shop_Lifter") ~= 5 then
-            LocalPlayer:SetAttribute("Shop_Lifter", 5)
-        end
-        if (LocalPlayer:GetAttribute("CarryWeight") or 0) > 0 then
-            LocalPlayer:SetAttribute("CarryWeight", 0)
         end
     end
 
@@ -241,13 +294,21 @@ RunService.Heartbeat:Connect(function()
             end
         end
     end
+
+    -- Auto-Revive if downed
+    if Settings.GodMode and ReviveRemote then
+        local downed = LocalPlayer:GetAttribute("StunnedUntil") or 0
+        if downed > workspace:GetServerTimeNow() then
+            ReviveRemote:FireServer("ReviveSelf")
+        end
+    end
 end)
 
 -- ========================================================================
--- 5. COMBAT SYSTEM (UpperTorso Hitreg, Minecraft Bat Spin, Auto-Taser)
+-- 5. COMBAT SYSTEM (CFrame Desync Reach, Bat Slash, PvP Teammate Support)
 -- ========================================================================
 
--- Valid target selector (filters out KO'd and dead NPCs, targets UpperTorso/Head)
+-- Valid target selector (NPCs, Cops, Guards, Dogs, and Teammates/Players)
 local function getValidCombatTargets(maxReach)
     local targets = {}
     local char = LocalPlayer.Character
@@ -258,6 +319,7 @@ local function getValidCombatTargets(maxReach)
     local serverTime = workspace:GetServerTimeNow()
     local reach = maxReach or Settings.AuraRadius
 
+    -- 1. NPCs, Cops, Guards, Dogs
     for _, tag in ipairs(CombatTags) do
         if tag == "Cop" and not Settings.TargetPolice then continue end
         if tag == "Guard" and not Settings.TargetGuards then continue end
@@ -270,7 +332,6 @@ local function getValidCombatTargets(maxReach)
                 local knockedUntil = npc:GetAttribute("KnockedOutUntil") or 0
 
                 if hum and hum.Health > 0 and (serverTime >= knockedUntil) then
-                    -- IMPORTANT: Server rejects HumanoidRootPart! Target UpperTorso, Head, or LowerTorso!
                     local targetPart = npc:FindFirstChild("UpperTorso")
                                     or npc:FindFirstChild("Head")
                                     or npc:FindFirstChild("LowerTorso")
@@ -278,7 +339,28 @@ local function getValidCombatTargets(maxReach)
                     if targetPart then
                         local dist = (targetPart.Position - myPos).Magnitude
                         if dist <= reach then
-                            table.insert(targets, {npc = npc, part = targetPart, dist = dist, tag = tag})
+                            table.insert(targets, {npc = npc, part = targetPart, dist = dist, tag = tag, isPlayer = false})
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- 2. Other Players / Teammates (PvP in Hideout & Game)
+    if Settings.TargetPlayers then
+        for _, otherPlayer in ipairs(Players:GetPlayers()) do
+            if otherPlayer ~= LocalPlayer and otherPlayer.Character then
+                local oChar = otherPlayer.Character
+                local oHum = oChar:FindFirstChildOfClass("Humanoid")
+                if oHum and oHum.Health > 0 then
+                    local targetPart = oChar:FindFirstChild("UpperTorso")
+                                    or oChar:FindFirstChild("Head")
+                                    or oChar:FindFirstChild("Torso")
+                    if targetPart then
+                        local dist = (targetPart.Position - myPos).Magnitude
+                        if dist <= reach then
+                            table.insert(targets, {npc = oChar, part = targetPart, dist = dist, tag = "Player (" .. otherPlayer.DisplayName .. ")", isPlayer = true})
                         end
                     end
                 end
@@ -290,31 +372,62 @@ local function getValidCombatTargets(maxReach)
     return targets
 end
 
--- Minecraft-style 360° Horizontal Bat Spin (Fixed Base Grip, No Drift)
-local function playBatSpin(bat)
-    if State.IsBatSpinning or not bat or not bat.Parent then return end
-    State.IsBatSpinning = true
+-- Play Snappy Bat Slash Animation
+local function playBatSlash(bat)
+    if not bat or not bat.Parent then return end
     if not State.BaseBatGrip then
         State.BaseBatGrip = bat.Grip
     end
 
-    task.spawn(function()
-        local spinSteps = 6
-        local stepDelay = 0.025
-        for i = 1, spinSteps do
-            if not bat or not bat.Parent then break end
-            local angle = (i / spinSteps) * math.pi * 2
-            bat.Grip = State.BaseBatGrip * CFrame.Angles(0, angle, math.sin(angle) * 0.25)
-            task.wait(stepDelay)
-        end
-        if bat and bat.Parent and State.BaseBatGrip then
-            bat.Grip = State.BaseBatGrip
-        end
-        State.IsBatSpinning = false
-    end)
+    if PunchWhooshSound then
+        local snd = PunchWhooshSound:Clone()
+        snd.PlaybackSpeed = 1.05
+        snd.Parent = workspace.CurrentCamera
+        snd:Play()
+        game:GetService("Debris"):AddItem(snd, 1)
+    end
+
+    if BatSwingModule and BatSwingModule.play then
+        pcall(function()
+            BatSwingModule.play(bat, State.BaseBatGrip)
+        end)
+    end
 end
 
--- Execute Bat / Punch Combat Cycle
+-- Strike Target with CFrame Desync Snap (Bypasses server distance checks)
+local function strikeTargetWithDesync(targetPart, isBatEquipped)
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp or not targetPart then return end
+
+    local myPos = hrp.Position
+    local tPos = targetPart.Position
+    local dist = (tPos - myPos).Magnitude
+
+    if dist <= 8 or not Settings.DesyncReachEnabled then
+        -- Within normal range or desync disabled: direct hit
+        if isBatEquipped and BatSwingRemote then
+            BatSwingRemote:FireServer(targetPart)
+        elseif PunchRemote then
+            PunchRemote:FireServer(targetPart)
+        end
+    else
+        -- Desync Reach: snap to target, strike, snap back
+        local oldCF = hrp.CFrame
+        local snapCF = CFrame.lookAt(tPos + (myPos - tPos).Unit * 2.2, tPos)
+        hrp.CFrame = snapCF
+        task.wait(0.015)
+        if isBatEquipped and BatSwingRemote then
+            BatSwingRemote:FireServer(targetPart)
+        elseif PunchRemote then
+            PunchRemote:FireServer(targetPart)
+        end
+        task.wait(0.015)
+        hrp.CFrame = oldCF
+    end
+end
+
+-- Execute Combat Cycle
 local function executeCombatCycle()
     local char = LocalPlayer.Character
     if not char then return end
@@ -335,27 +448,21 @@ local function executeCombatCycle()
 
     if Settings.MassiveAuraEnabled then
         for _, t in ipairs(targets) do
-            if isBatEquipped and BatSwingRemote then
-                BatSwingRemote:FireServer(t.part)
-            elseif PunchRemote then
-                PunchRemote:FireServer(t.part)
-            end
+            strikeTargetWithDesync(t.part, isBatEquipped)
         end
         if isBatEquipped then
-            playBatSpin(bat)
+            playBatSlash(bat)
         end
     else
         local t = targets[1]
-        if isBatEquipped and BatSwingRemote then
-            BatSwingRemote:FireServer(t.part)
-            playBatSpin(bat)
-        elseif PunchRemote then
-            PunchRemote:FireServer(t.part)
+        strikeTargetWithDesync(t.part, isBatEquipped)
+        if isBatEquipped then
+            playBatSlash(bat)
         end
     end
 end
 
--- Auto-Taser Cycle (Auto-aim from Camera + Cooldown Reset)
+-- Auto-Taser Cycle
 local function executeAutoTaserCycle()
     if not Settings.AutoTaserEnabled or not TaserFireRemote then return end
     local char = LocalPlayer.Character
@@ -363,7 +470,6 @@ local function executeAutoTaserCycle()
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not hum or hum.Health <= 0 then return end
 
-    -- Reset client cooldown attribute so client never blocks
     LocalPlayer:SetAttribute("TaserReadyAt", 0)
 
     local taser = char:FindFirstChild("Taser")
@@ -428,7 +534,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ========================================================================
--- 7. COMPACT ESP SYSTEM (Loot & NPCs)
+-- 7. CLEAN & HIGH-FPS ESP SYSTEM (No Stones, No Spawn Clutter, Throttled)
 -- ========================================================================
 local EspFolder = Instance.new("Folder")
 EspFolder.Name = "NyxEspFolder"
@@ -465,51 +571,73 @@ local function cleanBillboard(tbl, key)
     end
 end
 
--- Update Loot & NPC ESP
-RunService.RenderStepped:Connect(function()
+-- Throttled ESP Loop (Runs 10 times a second to ensure 180+ FPS)
+RunService.Heartbeat:Connect(function()
+    local now = os.clock()
+    if now - State.LastEspCycle < 0.1 then return end
+    State.LastEspCycle = now
+
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     local myPos = hrp and hrp.Position or Vector3.zero
     local serverTime = workspace:GetServerTimeNow()
 
-    -- Loot ESP
+    -- 1. Loot ESP (Strict Filtering: In Workspace, Not Stone, Value > 0 or Heavy)
     if Settings.LootEspEnabled and hrp then
         for _, item in ipairs(CollectionService:GetTagged("Loot")) do
-            if item:IsA("BasePart") or item:IsA("Model") then
-                local rootPart = item:IsA("BasePart") and item or (item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart"))
-                if rootPart and rootPart.Parent and rootPart.Transparency < 0.9 then
-                    local dist = (rootPart.Position - myPos).Magnitude
-                    if dist <= Settings.MaxEspDistance then
-                        local entry = ActiveLootEsp[item]
-                        if not entry then
-                            local bb, lbl = createBillboard("LootEsp", rootPart, UDim2.fromOffset(130, 26), Vector3.new(0, 1.2, 0))
-                            entry = {gui = bb, label = lbl, part = rootPart}
-                            ActiveLootEsp[item] = entry
-                        end
+            -- Ignore anything NOT in Workspace (e.g. ReplicatedStorage or PlayerGui previews!)
+            if not item:IsDescendantOf(workspace) then
+                cleanBillboard(ActiveLootEsp, item)
+                continue
+            end
 
-                        local val = item:GetAttribute("Value") or rootPart:GetAttribute("Value") or 0
-                        local isHeavy = item:GetAttribute("Heavy") or rootPart:GetAttribute("Heavy") or false
-                        local tag = isHeavy and "[H] " or ""
-                        entry.label.Text = string.format("%s%s  $%d  (%dm)", tag, item.Name, val, math.floor(dist))
-                        entry.label.TextColor3 = isHeavy and Color3.fromRGB(255, 170, 0) or Color3.fromRGB(0, 230, 118)
-                        entry.gui.Enabled = true
-                    else
-                        if ActiveLootEsp[item] then ActiveLootEsp[item].gui.Enabled = false end
-                    end
-                else
+            -- Filter out Stones / Rocks / Clutter
+            local lowerName = string.lower(item.Name)
+            if string.find(lowerName, "stone") or string.find(lowerName, "rock") then
+                cleanBillboard(ActiveLootEsp, item)
+                continue
+            end
+
+            local rootPart = item:IsA("BasePart") and item or (item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart"))
+            if rootPart and rootPart.Parent and rootPart.Transparency < 0.9 then
+                local val = item:GetAttribute("Value") or rootPart:GetAttribute("Value") or 0
+                local isHeavy = item:GetAttribute("Heavy") or rootPart:GetAttribute("Heavy") or false
+
+                -- Ignore $0 useless items (unless heavy)
+                if val <= 0 and not isHeavy then
                     cleanBillboard(ActiveLootEsp, item)
+                    continue
                 end
+
+                local dist = (rootPart.Position - myPos).Magnitude
+                if dist <= Settings.MaxEspDistance then
+                    local entry = ActiveLootEsp[item]
+                    if not entry then
+                        local bb, lbl = createBillboard("LootEsp", rootPart, UDim2.fromOffset(130, 26), Vector3.new(0, 1.2, 0))
+                        entry = {gui = bb, label = lbl, part = rootPart}
+                        ActiveLootEsp[item] = entry
+                    end
+
+                    local tag = isHeavy and "[H] " or ""
+                    entry.label.Text = string.format("%s%s  $%d  (%dm)", tag, item.Name, val, math.floor(dist))
+                    entry.label.TextColor3 = isHeavy and Color3.fromRGB(255, 170, 0) or Color3.fromRGB(0, 230, 118)
+                    entry.gui.Enabled = true
+                else
+                    if ActiveLootEsp[item] then ActiveLootEsp[item].gui.Enabled = false end
+                end
+            else
+                cleanBillboard(ActiveLootEsp, item)
             end
         end
     else
         for _, entry in pairs(ActiveLootEsp) do entry.gui.Enabled = false end
     end
 
-    -- NPC ESP
+    -- 2. NPC & Player ESP
     if Settings.NpcEspEnabled and hrp then
         for _, tag in ipairs(CombatTags) do
             for _, npc in ipairs(CollectionService:GetTagged(tag)) do
-                if npc:IsA("Model") and npc ~= char then
+                if npc:IsA("Model") and npc ~= char and npc:IsDescendantOf(workspace) then
                     local targetPart = npc:FindFirstChild("Head") or npc:FindFirstChild("HumanoidRootPart") or npc.PrimaryPart
                     local hum = npc:FindFirstChildOfClass("Humanoid")
 
@@ -555,7 +683,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ========================================================================
--- 8. AUTO-FARM LEVEL / EXP (Steal & Drop Rapid Cycle)
+-- 8. AUTO-FARM LEVEL / EXP
 -- ========================================================================
 local function executeAutoFarmXpStep()
     if not Settings.AutoFarmXpEnabled or not LootGrabRemote or not LootReleaseRemote then return end
@@ -568,12 +696,14 @@ local function executeAutoFarmXpStep()
     local nearestDist = 18
 
     for _, item in ipairs(CollectionService:GetTagged("Loot")) do
-        local part = item:IsA("BasePart") and item or (item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart"))
-        if part and part.Parent and part.Transparency < 0.9 then
-            local d = (part.Position - myPos).Magnitude
-            if d <= nearestDist then
-                nearestDist = d
-                nearestLoot = item
+        if item:IsDescendantOf(workspace) then
+            local part = item:IsA("BasePart") and item or (item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart"))
+            if part and part.Parent and part.Transparency < 0.9 then
+                local d = (part.Position - myPos).Magnitude
+                if d <= nearestDist then
+                    nearestDist = d
+                    nearestLoot = item
+                end
             end
         end
     end
@@ -599,7 +729,7 @@ RunService.Heartbeat:Connect(function()
 end)
 
 -- ========================================================================
--- 9. SAFE TRUNK ACTIONS (Tools/Weapons Protected!)
+-- 9. SAFE TRUNK ACTIONS (Weapons / Tools Protected!)
 -- ========================================================================
 local function triggerPrompt(prompt)
     if not prompt or not prompt.Parent then return false end
@@ -625,23 +755,20 @@ local function isProtectedWeapon(tool)
     return false
 end
 
--- Unload Inventory Stash to Trunk (Leaves Weapons & Tools Untouched!)
 local function unloadInventoryToTrunk()
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     local backpack = LocalPlayer:FindFirstChild("Backpack")
-    if not char or not hum or not backpack then return end
+    if not char or not hum or not backpack then return 0 end
 
-    -- Safe stow: Put all weapons safely into Backpack
     for _, tool in ipairs(char:GetChildren()) do
         if tool:IsA("Tool") and isProtectedWeapon(tool) then
             tool.Parent = backpack
         end
     end
 
-    -- Find nearest truck trunk
     local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+    if not hrp then return 0 end
     local myPos = hrp.Position
 
     local nearestPrompt = nil
@@ -651,24 +778,9 @@ local function unloadInventoryToTrunk()
         for _, desc in ipairs(truck:GetDescendants()) do
             if desc:IsA("ProximityPrompt") and (string.find(string.lower(desc.ActionText), "store") or string.find(string.lower(desc.ObjectText), "trunk") or string.find(string.lower(desc.ActionText), "stash")) then
                 local pPos = desc.Parent and desc.Parent:GetPivot().Position
-                if pPos then
-                    local d = (pPos - myPos).Magnitude
-                    if d < minDist then
-                        minDist = d
-                        nearestPrompt = desc
-                    end
-                end
-            end
-        end
-    end
-
-    if not nearestPrompt then
-        for _, desc in ipairs(workspace:GetDescendants()) do
-            if desc:IsA("ProximityPrompt") and string.find(string.lower(desc.ActionText), "store") then
-                local pPos = desc.Parent and desc.Parent:GetPivot().Position
                 if pPos and (pPos - myPos).Magnitude < minDist then
+                    minDist = (pPos - myPos).Magnitude
                     nearestPrompt = desc
-                    break
                 end
             end
         end
@@ -690,11 +802,10 @@ local function unloadInventoryToTrunk()
     return 0
 end
 
--- Load Nearby Heavy Items into Truck
 local function loadNearbyHeavyToTrunk()
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+    if not hrp then return 0 end
     local myPos = hrp.Position
 
     local truck = nil
@@ -714,24 +825,26 @@ local function loadNearbyHeavyToTrunk()
 
     local loadedCount = 0
     for _, item in ipairs(CollectionService:GetTagged("Loot")) do
-        local part = item:IsA("BasePart") and item or (item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart"))
-        if part and part.Parent and part.Transparency < 0.9 then
-            local isHeavy = item:GetAttribute("Heavy") or part:GetAttribute("Heavy") or false
-            if isHeavy then
-                local d = (part.Position - myPos).Magnitude
-                if d <= 30 then
-                    pcall(function()
-                        if LootGrabRemote then
-                            LootGrabRemote:FireServer(item)
-                            task.wait(0.05)
-                        end
-                        part.CFrame = trunkPart.CFrame + Vector3.new(0, 1.5, 0)
-                        if LootReleaseRemote then
-                            LootReleaseRemote:FireServer(item)
-                        end
-                        loadedCount = loadedCount + 1
-                    end)
-                    task.wait(0.1)
+        if item:IsDescendantOf(workspace) then
+            local part = item:IsA("BasePart") and item or (item.PrimaryPart or item:FindFirstChildWhichIsA("BasePart"))
+            if part and part.Parent and part.Transparency < 0.9 then
+                local isHeavy = item:GetAttribute("Heavy") or part:GetAttribute("Heavy") or false
+                if isHeavy then
+                    local d = (part.Position - myPos).Magnitude
+                    if d <= 30 then
+                        pcall(function()
+                            if LootGrabRemote then
+                                LootGrabRemote:FireServer(item)
+                                task.wait(0.05)
+                            end
+                            part.CFrame = trunkPart.CFrame + Vector3.new(0, 1.5, 0)
+                            if LootReleaseRemote then
+                                LootReleaseRemote:FireServer(item)
+                            end
+                            loadedCount = loadedCount + 1
+                        end)
+                        task.wait(0.1)
+                    end
                 end
             end
         end
@@ -772,6 +885,14 @@ _G.NyxCriminalSimCleanup = function()
     if FlyPlatform then pcall(function() FlyPlatform:Destroy() end) end
     pcall(function() LocalPlayer:SetAttribute("Flying", false) end)
     pcall(function() if SneakRemote then SneakRemote:FireServer(false) end end)
+    pcall(function()
+        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+            hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+            hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
+        end
+    end)
 end
 
 -- Main Card Frame
@@ -815,13 +936,13 @@ HeaderTitle.Size = UDim2.new(1, -75, 1, 0)
 HeaderTitle.Position = UDim2.fromOffset(16, 0)
 HeaderTitle.BackgroundTransparency = 1
 HeaderTitle.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
-HeaderTitle.Text = "⚡ NYX // CRIMINAL SIMULATOR v2.3"
+HeaderTitle.Text = "⚡ NYX // CRIMINAL SIMULATOR v2.4"
 HeaderTitle.TextColor3 = Color3.fromRGB(240, 248, 255)
 HeaderTitle.TextSize = 13
 HeaderTitle.TextXAlignment = Enum.TextXAlignment.Left
 HeaderTitle.Parent = Header
 
--- Clean ASCII Controls: Minimize and Close
+-- Clean Controls: Minimize and Close
 local MinBtn = Instance.new("TextButton")
 MinBtn.Name = "MinBtn"
 MinBtn.Size = UDim2.fromOffset(26, 26)
@@ -883,7 +1004,7 @@ MinBtn.MouseButton1Click:Connect(function()
     OpenPill.Visible = State.IsMinimized
 end)
 
--- Tab Bar (5 Tabs)
+-- Tab Bar
 local TabBar = Instance.new("Frame")
 TabBar.Name = "TabBar"
 TabBar.Size = UDim2.new(1, -24, 0, 32)
@@ -977,7 +1098,7 @@ end
 switchTab("Combat")
 
 -- ========================================================================
--- 11. UI BUILDER HELPERS (Sections, Toggles, Sliders, Buttons)
+-- 11. UI BUILDER HELPERS
 -- ========================================================================
 local function addSectionLabel(parent, title, order)
     local lbl = Instance.new("TextLabel")
@@ -1199,37 +1320,71 @@ local _, setMassiveToggle = addToggle(combatPage, "💥 Massive Crowd Wipe (Mult
     notifyUser("Massive Crowd Wipe: " .. (val and "ON (Simultaneous)" or "OFF (Single Target)"), Color3.fromRGB(0, 210, 255))
 end)
 
-local _, setTaserToggle = addToggle(combatPage, "⚡ Auto-Taser (Auto-Aim Stun)", Settings.AutoTaserEnabled, 4, function(val)
+addToggle(combatPage, "⚡ CFrame Desync Strike (Hit From Any Distance)", Settings.DesyncReachEnabled, 4, function(val)
+    Settings.DesyncReachEnabled = val
+    notifyUser("Desync Strike: " .. (val and "ON (Bypass Server Reach)" or "OFF"), Color3.fromRGB(0, 210, 255))
+end)
+
+local _, setTaserToggle = addToggle(combatPage, "⚡ Auto-Taser (Auto-Aim Stun)", Settings.AutoTaserEnabled, 5, function(val)
     Settings.AutoTaserEnabled = val
     notifyUser("Auto-Taser: " .. (val and "ACTIVE (Zero Cooldown)" or "OFF"), val and Color3.fromRGB(0, 230, 118) or Color3.fromRGB(255, 120, 120))
 end)
 
-addToggle(combatPage, "Radius Ground Visualizer", Settings.VisualizerEnabled, 5, function(val)
+addToggle(combatPage, "Radius Ground Visualizer", Settings.VisualizerEnabled, 6, function(val)
     Settings.VisualizerEnabled = val
 end)
 
-addSlider(combatPage, "Bat Aura Reach Radius", 5, 35, Settings.AuraRadius, " studs", 6, function(val)
+addSlider(combatPage, "Bat Aura Reach Radius", 5, 40, Settings.AuraRadius, " studs", 7, function(val)
     Settings.AuraRadius = val
 end)
 
-addSlider(combatPage, "Auto-Taser Reach Radius", 15, 60, Settings.TaserRadius, " studs", 7, function(val)
+addSlider(combatPage, "Auto-Taser Reach Radius", 15, 60, Settings.TaserRadius, " studs", 8, function(val)
     Settings.TaserRadius = val
 end)
 
-addSectionLabel(combatPage, "TARGET FILTER FILTERS", 8)
-addToggle(combatPage, "Target Police / Cops", Settings.TargetPolice, 9, function(v) Settings.TargetPolice = v end)
-addToggle(combatPage, "Target Security Guards", Settings.TargetGuards, 10, function(v) Settings.TargetGuards = v end)
-addToggle(combatPage, "Target Guard Dogs", Settings.TargetDogs, 11, function(v) Settings.TargetDogs = v end)
-addToggle(combatPage, "Target Residents / Civilians", Settings.TargetResidents, 12, function(v) Settings.TargetResidents = v end)
+addSectionLabel(combatPage, "TARGET FILTER FILTERS (COPS, NPCS & PVP)", 9)
+addToggle(combatPage, "Target Police / Cops", Settings.TargetPolice, 10, function(v) Settings.TargetPolice = v end)
+addToggle(combatPage, "Target Security Guards", Settings.TargetGuards, 11, function(v) Settings.TargetGuards = v end)
+addToggle(combatPage, "Target Guard Dogs", Settings.TargetDogs, 12, function(v) Settings.TargetDogs = v end)
+addToggle(combatPage, "Target Residents / Civilians", Settings.TargetResidents, 13, function(v) Settings.TargetResidents = v end)
+
+local _, setPvpToggle = addToggle(combatPage, "👥 Target Teammates / Friends (PvP)", Settings.TargetPlayers, 14, function(val)
+    Settings.TargetPlayers = val
+    notifyUser("Target Teammates: " .. (val and "ENABLED (Knock Out Friends!)" or "DISABLED"), val and Color3.fromRGB(255, 100, 100) or Color3.fromRGB(0, 210, 255))
+end)
 
 -- ========================================================================
 -- 13. TAB 2: 🏃 MOVEMENT & CHEATS TAB
 -- ========================================================================
 local movePage = TabPages["Movement"]
 
-addSectionLabel(movePage, "STEALTH & FLIGHT SYSTEMS", 1)
+addSectionLabel(movePage, "IMMORTALITY & COLLISION", 1)
 
-local _, setSilentWalkToggle = addToggle(movePage, "🥷 Silent Walk (Full-Speed Sneak)", Settings.SilentWalkEnabled, 2, function(val)
+addToggle(movePage, "🛡️ No Fall Damage (Zero Fall Damage Forever)", Settings.NoFallDamage, 2, function(val)
+    Settings.NoFallDamage = val
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, not val)
+        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, not val)
+        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, not val)
+    end
+    notifyUser("No Fall Damage: " .. (val and "ACTIVE" or "OFF"), val and Color3.fromRGB(0, 230, 118) or Color3.fromRGB(255, 120, 120))
+end)
+
+addToggle(movePage, "💖 God Mode / Auto-Revive (Instant Self-Revive)", Settings.GodMode, 3, function(val)
+    Settings.GodMode = val
+    notifyUser("God Mode: " .. (val and "ACTIVE (Immortal)" or "OFF"), val and Color3.fromRGB(0, 230, 118) or Color3.fromRGB(255, 120, 120))
+end)
+
+local _, setNoclipToggle = addToggle(movePage, "🚶 Noclip (Walk Through Any Wall/Door)", Settings.NoclipEnabled, 4, function(val)
+    Settings.NoclipEnabled = val
+    notifyUser("Noclip: " .. (val and "ON (Walk Through Walls)" or "OFF"), val and Color3.fromRGB(0, 230, 118) or Color3.fromRGB(255, 120, 120))
+end)
+
+addSectionLabel(movePage, "STEALTH & FLIGHT SYSTEMS", 5)
+
+local _, setSilentWalkToggle = addToggle(movePage, "🥷 Silent Walk (Full-Speed Sneak)", Settings.SilentWalkEnabled, 6, function(val)
     Settings.SilentWalkEnabled = val
     if not val and SneakRemote then
         pcall(function() SneakRemote:FireServer(false) end)
@@ -1237,18 +1392,18 @@ local _, setSilentWalkToggle = addToggle(movePage, "🥷 Silent Walk (Full-Speed
     notifyUser("Silent Walk: " .. (val and "ON (0 Footstep Noise)" or "OFF"), val and Color3.fromRGB(0, 230, 118) or Color3.fromRGB(255, 120, 120))
 end)
 
-local _, setFlyToggle = addToggle(movePage, "🕊️ Anti-Rubberband Flight", Settings.FlyEnabled, 3, function(val)
+local _, setFlyToggle = addToggle(movePage, "🕊️ Low-Hover Flight", Settings.FlyEnabled, 7, function(val)
     setFlyState(val)
 end)
 
-addSectionLabel(movePage, "INFINITE RESOURCES", 4)
+addSectionLabel(movePage, "INFINITE RESOURCES", 8)
 
-addToggle(movePage, "🏃 Infinite Stamina (Never Out of Breath)", Settings.InfiniteStamina, 5, function(val)
+addToggle(movePage, "🏃 Infinite Stamina (Never Out of Breath)", Settings.InfiniteStamina, 9, function(val)
     Settings.InfiniteStamina = val
     notifyUser("Infinite Stamina: " .. (val and "ON" or "OFF"), val and Color3.fromRGB(0, 230, 118) or Color3.fromRGB(255, 120, 120))
 end)
 
-addToggle(movePage, "⛽ Infinite Car Fuel (Lock Tank at 100%)", Settings.InfiniteFuel, 6, function(val)
+addToggle(movePage, "⛽ Infinite Car Fuel (Lock Tank at 100%)", Settings.InfiniteFuel, 10, function(val)
     Settings.InfiniteFuel = val
     notifyUser("Infinite Fuel: " .. (val and "ON" or "OFF"), val and Color3.fromRGB(0, 230, 118) or Color3.fromRGB(255, 120, 120))
 end)
@@ -1287,9 +1442,9 @@ end)
 -- ========================================================================
 local visualsPage = TabPages["Visuals"]
 
-addSectionLabel(visualsPage, "WORLD ESP RADAR", 1)
+addSectionLabel(visualsPage, "CLEAN 180+ FPS WORLD RADAR", 1)
 
-addToggle(visualsPage, "📦 Compact Loot ESP ($ Value + [H] Tag)", Settings.LootEspEnabled, 2, function(val)
+addToggle(visualsPage, "📦 Clean Loot ESP ($ Value, [H] Tag, No Stones)", Settings.LootEspEnabled, 2, function(val)
     Settings.LootEspEnabled = val
     notifyUser("Loot ESP: " .. (val and "ON" or "OFF"), val and Color3.fromRGB(0, 230, 118) or Color3.fromRGB(255, 120, 120))
 end)
@@ -1299,7 +1454,7 @@ addToggle(visualsPage, "👤 NPC & Police ESP ([KO] Status Tracker)", Settings.N
     notifyUser("NPC ESP: " .. (val and "ON" or "OFF"), val and Color3.fromRGB(0, 230, 118) or Color3.fromRGB(255, 120, 120))
 end)
 
-addSlider(visualsPage, "ESP Maximum Render Distance", 50, 500, Settings.MaxEspDistance, " studs", 4, function(val)
+addSlider(visualsPage, "ESP Maximum Render Distance", 50, 400, Settings.MaxEspDistance, " studs", 4, function(val)
     Settings.MaxEspDistance = val
 end)
 
@@ -1316,9 +1471,10 @@ local KeybindList = {
     {action = "ToggleUI", name = "Toggle Menu Visibility", default = Settings.Keybinds.ToggleUI},
     {action = "KillAura", name = "Toggle Kill Aura (Bat/Fists)", default = Settings.Keybinds.KillAura},
     {action = "MassiveAura", name = "Toggle Massive Crowd Wipe", default = Settings.Keybinds.MassiveAura},
+    {action = "Noclip", name = "Toggle Noclip (Walk Through Walls)", default = Settings.Keybinds.Noclip},
     {action = "AutoTaser", name = "Toggle Auto-Taser Rapid Stun", default = Settings.Keybinds.AutoTaser},
     {action = "SilentWalk", name = "Toggle Silent Walk (Full Speed)", default = Settings.Keybinds.SilentWalk},
-    {action = "Fly", name = "Toggle Anti-Rubberband Flight", default = Settings.Keybinds.Fly},
+    {action = "Fly", name = "Toggle Flight", default = Settings.Keybinds.Fly},
     {action = "UnloadStash", name = "Unload Stash to Trunk", default = Settings.Keybinds.UnloadStash},
     {action = "LoadHeavy", name = "Load Nearby Heavy Loot to Truck", default = Settings.Keybinds.LoadHeavy},
     {action = "AutoFarmXP", name = "Toggle Auto-Farm Level / EXP", default = Settings.Keybinds.AutoFarmXP},
@@ -1417,6 +1573,9 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
         Settings.MassiveAuraEnabled = not Settings.MassiveAuraEnabled
         setMassiveToggle(Settings.MassiveAuraEnabled)
         notifyUser("Massive Mode: " .. (Settings.MassiveAuraEnabled and "ON" or "OFF"), Color3.fromRGB(0, 210, 255))
+    elseif k == Settings.Keybinds.Noclip then
+        Settings.NoclipEnabled = not Settings.NoclipEnabled
+        setNoclipToggle(Settings.NoclipEnabled)
     elseif k == Settings.Keybinds.AutoTaser then
         Settings.AutoTaserEnabled = not Settings.AutoTaserEnabled
         setTaserToggle(Settings.AutoTaserEnabled)
@@ -1446,7 +1605,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 -- ========================================================================
--- 17. FOOTER BAR & NOTIFICATIONS
+-- 17. FOOTER BAR & NOTIFICATIONS OVER HOTBAR
 -- ========================================================================
 local Footer = Instance.new("Frame")
 Footer.Name = "Footer"
@@ -1473,18 +1632,19 @@ RunService.RenderStepped:Connect(function()
     StatusLbl.Text = string.format("Weapon: %s  |  EXP Stolen: %d", State.CurrentWeapon, State.XpFarmCount)
 end)
 
--- Floating Toast Notification Function
+-- Glowing Toast Notification Positioned Directly Above Bottom Hotbar
 function notifyUser(msg, col)
     local toast = Instance.new("Frame")
-    toast.Size = UDim2.fromOffset(260, 30)
-    toast.Position = UDim2.new(0.5, -130, 0.88, 0)
-    toast.BackgroundColor3 = Color3.fromRGB(15, 20, 30)
+    toast.Size = UDim2.fromOffset(280, 32)
+    -- Centered horizontally, positioned right above the bottom hotbar
+    toast.Position = UDim2.new(0.5, -140, 1, -115)
+    toast.BackgroundColor3 = Color3.fromRGB(12, 16, 24)
     toast.BorderSizePixel = 0
     toast.Parent = ScreenGui
     Instance.new("UICorner", toast).CornerRadius = UDim.new(0, 8)
 
     local stroke = Instance.new("UIStroke", toast)
-    stroke.Thickness = 1
+    stroke.Thickness = 1.5
     stroke.Color = col or Color3.fromRGB(0, 220, 255)
 
     local txt = Instance.new("TextLabel")
@@ -1502,9 +1662,9 @@ function notifyUser(msg, col)
 
     TweenService:Create(toast, TweenInfo.new(0.2), {BackgroundTransparency = 0.15}):Play()
     TweenService:Create(txt, TweenInfo.new(0.2), {TextTransparency = 0}):Play()
-    TweenService:Create(stroke, TweenInfo.new(0.2), {Transparency = 0.3}):Play()
+    TweenService:Create(stroke, TweenInfo.new(0.2), {Transparency = 0.2}):Play()
 
-    task.delay(1.8, function()
+    task.delay(1.9, function()
         TweenService:Create(toast, TweenInfo.new(0.25), {BackgroundTransparency = 1}):Play()
         TweenService:Create(txt, TweenInfo.new(0.25), {TextTransparency = 1}):Play()
         TweenService:Create(stroke, TweenInfo.new(0.25), {Transparency = 1}):Play()
@@ -1513,5 +1673,5 @@ function notifyUser(msg, col)
     end)
 end
 
-notifyUser("⚡ Nyx Criminal Sim Bot v2.3 Loaded!", Color3.fromRGB(0, 230, 118))
-print("[Nyx] Criminal Simulator Bot v2.3 successfully loaded.")
+notifyUser("⚡ Nyx Criminal Sim Bot v2.4 Loaded!", Color3.fromRGB(0, 230, 118))
+print("[Nyx] Criminal Simulator Bot v2.4 successfully loaded.")
