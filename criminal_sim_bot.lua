@@ -1,78 +1,108 @@
 --[[
     ========================================================================
-    ⚡ NYX // CRIMINAL SIMULATOR BOT v2.1 — "Game | Criminal Simulator"
+    ⚡ NYX // CRIMINAL SIMULATOR BOT v2.2 — "Game | Criminal Simulator"
     ========================================================================
     Place ID: 73251213967624 | Universe ID: 10769851460
     Platform: PC & Mobile (Delta, Fluxus, Hydrogen, Codex, Arceus X, Real)
     Author: Nyx & Larpbase
 
-    Changelog v2.1:
+    Changelog v2.2:
+    - 🔒 STRICT SINGLE INSTANCE CLEANUP:
+        * Auto-purges all ghost instances and threads across gethui, CoreGui, and PlayerGui.
+        * No more duplicate GUIs or conflicted keybinds!
+    - 🕊️ INTEGRATED FLY HACK:
+        * Native smooth flight with WASD + Space (Up) + Ctrl (Down) + Shift (Boost 120 spd).
+        * Toggleable via GUI or configurable Keybind (default: F).
     - 🛡️ SAFE INVENTORY UNLOAD:
         * Bat, Pistol, Lockpicks, Blowtorch, and all weapons/tools NEVER dropped!
         * Only actual stashed stolen loot (ShopId == nil) gets unloaded to Trunk.
-    - 🏃 INFINITE STAMINA:
-        * Sprint forever without tiring out (native God attribute & breath suppression).
-    - ⛽ INFINITE CAR FUEL:
-        * Car fuel locked at 100% — never runs out of gas or stalls.
+    - 🛒 REMOTE SHOP & UPGRADE BUYER:
+        * Buy any tool or upgrade from anywhere on the map with 1 click!
+    - 🏃 INFINITE STAMINA & ⛽ INFINITE CAR FUEL:
+        * Sprint forever without tiring out; car gas locked at 100%.
     - 💥 MASSIVE CROWD KILL AURA:
         * Bat 1-hit knockout on all cops/guards in radius simultaneously.
     - 📦 COMPACT LOOT & NPC ESP:
         * Clean $ value labels, [H] heavy tag, distance-clamped, zero screen clutter.
     - ⚡ AUTO-FARM LEVEL / EXP:
         * Rapid grab & release cycle to pump Steal XP and level up fast.
-    - ⌨️ CUSTOM INTERACTIVE KEYBINDS:
-        * Rebind every single function in-game.
+    - 💎 REFINED HIGH-END GLASSMORPHISM UI:
+        * Fixed close button glyph (no more broken square!).
+        * Polished glowing acrylic styling with pill tabs and animated switches.
 ]]
 
--- Cleanup previous instance
-if _G.NyxCriminalSimInstance then
-    pcall(function() _G.NyxCriminalSimInstance:Destroy() end)
-    _G.NyxCriminalSimInstance = nil
+-- ========================================================================
+-- 1. STRICT SINGLE-INSTANCE CLEANUP
+-- ========================================================================
+if _G.NyxCriminalSimCleanup then
+    pcall(_G.NyxCriminalSimCleanup)
+    _G.NyxCriminalSimCleanup = nil
 end
 
 local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+local function purgeExistingGuis()
+    local containers = {}
+    if gethui then table.insert(containers, gethui()) end
+    if CoreGui then table.insert(containers, CoreGui) end
+    if LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui") then
+        table.insert(containers, LocalPlayer.PlayerGui)
+    end
+    for _, container in ipairs(containers) do
+        for _, child in ipairs(container:GetChildren()) do
+            if child.Name == "NyxCriminalSimGui" or child.Name == "NyxAuraVisualizer" or child.Name == "NyxEspFolder" then
+                pcall(function() child:Destroy() end)
+            end
+        end
+    end
+end
+purgeExistingGuis()
+
+-- ========================================================================
+-- 2. SERVICES & REFERENCES
+-- ========================================================================
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local CollectionService = game:GetService("CollectionService")
 local TweenService = game:GetService("TweenService")
-local CoreGui = game:GetService("CoreGui")
 
-local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
-
--- Remotes
 local Remotes = ReplicatedStorage:WaitForChild("Remotes", 10)
 local BatSwingRemote = Remotes and Remotes:WaitForChild("BatSwing", 5)
 local PunchRemote = Remotes and Remotes:WaitForChild("Punch", 5)
 local HotbarRemote = Remotes and Remotes:WaitForChild("Hotbar", 5)
 local LootGrabRemote = Remotes and Remotes:WaitForChild("LootGrab", 5)
 local LootReleaseRemote = Remotes and Remotes:WaitForChild("LootRelease", 5)
+local ShopBuyRemote = Remotes and Remotes:WaitForChild("ShopBuy", 5)
 local BreathingRemote = Remotes and Remotes:FindFirstChild("Breathing")
 
 -- ========================================================================
--- CONFIGURATION & STATE
+-- 3. CONFIGURATION & STATE
 -- ========================================================================
 local Settings = {
     -- Combat
     KillAuraEnabled = false,
-    MassiveAuraEnabled = true,     -- Hits ALL targets in radius simultaneously
+    MassiveAuraEnabled = true,
     AuraRadius = 16,
-    AttackCooldown = 0.15,         -- Cooldown between aura passes
+    AttackCooldown = 0.15,
     VisualizerEnabled = true,
     TargetPolice = true,
     TargetGuards = true,
     TargetDogs = true,
     TargetResidents = true,
 
-    -- Cheats & Exploits
-    InfiniteStamina = true,        -- Never runs out of breath/stamina
-    InfiniteFuel = true,           -- Car gas locked at 100%
+    -- Movement & Cheats
+    FlyEnabled = false,
+    InfiniteStamina = true,
+    InfiniteFuel = true,
 
     -- Visuals / ESP
     LootEspEnabled = true,
     LootEspMaxDist = 65,
-    MinLootValue = 1,              -- Filters out $0 junk like stones
+    MinLootValue = 1,
     NpcEspEnabled = true,
     NpcEspMaxDist = 80,
     ShowKoStatus = true,
@@ -87,14 +117,13 @@ local Settings = {
         ToggleUI = Enum.KeyCode.RightShift,
         KillAura = Enum.KeyCode.X,
         MassiveAura = Enum.KeyCode.Z,
+        Fly = Enum.KeyCode.F,
         UnloadStash = Enum.KeyCode.U,
         LoadHeavy = Enum.KeyCode.H,
         AutoSell = Enum.KeyCode.J,
         LootEsp = Enum.KeyCode.L,
         NpcEsp = Enum.KeyCode.K,
         AutoFarmXP = Enum.KeyCode.P,
-        InfiniteStamina = Enum.KeyCode.None,
-        InfiniteFuel = Enum.KeyCode.None,
     }
 }
 
@@ -118,8 +147,15 @@ EspFolder.Name = "NyxEspFolder"
 local notifyUser = function(msg, color) print("[NYX]: " .. msg) end
 
 -- ========================================================================
--- CHEAT LOOPS: INFINITE STAMINA & INFINITE FUEL
+-- 4. CHEAT LOOPS: FLY, STAMINA & FUEL
 -- ========================================================================
+-- Native Fly Toggle
+local function setFlyState(enabled)
+    Settings.FlyEnabled = enabled
+    LocalPlayer:SetAttribute("Flying", enabled)
+    notifyUser("Fly Hack: " .. (enabled and "ACTIVE (WASD+Space+Ctrl)" or "OFF"), enabled and Color3.fromRGB(0, 230, 118) or Color3.fromRGB(255, 120, 120))
+end
+
 RunService.Heartbeat:Connect(function()
     -- 1. Infinite Stamina
     if Settings.InfiniteStamina then
@@ -139,10 +175,15 @@ RunService.Heartbeat:Connect(function()
             end
         end
     end
+
+    -- 3. Fly State Sync
+    if Settings.FlyEnabled and LocalPlayer:GetAttribute("Flying") ~= true then
+        LocalPlayer:SetAttribute("Flying", true)
+    end
 end)
 
 -- ========================================================================
--- COMBAT SYSTEM (1-Hit Bat & Rapid Fists / Massive Knockout)
+-- 5. COMBAT SYSTEM (1-Hit Bat & Rapid Fists / Massive Knockout)
 -- ========================================================================
 local function getValidTargets()
     local targets = {}
@@ -164,7 +205,6 @@ local function getValidTargets()
                 local hum = npc:FindFirstChildOfClass("Humanoid")
                 local knockedUntil = npc:GetAttribute("KnockedOutUntil") or 0
 
-                -- Target only active living, non-knocked-out NPCs
                 if hum and hum.Health > 0 and (serverTime >= knockedUntil) then
                     local targetPart = npc:FindFirstChild("HumanoidRootPart")
                                     or npc:FindFirstChild("Head")
@@ -194,7 +234,6 @@ local function executeCombatCycle()
     local targets = getValidTargets()
     if #targets == 0 then return end
 
-    -- Check if player owns Baseball Bat
     local bat = char:FindFirstChild("Bat")
     if not bat and LocalPlayer.Backpack:FindFirstChild("Bat") then
         bat = LocalPlayer.Backpack:FindFirstChild("Bat")
@@ -205,7 +244,6 @@ local function executeCombatCycle()
     State.CurrentWeapon = isBatEquipped and "Baseball Bat (1-Hit KO)" or "Fists (Rapid KO)"
 
     if Settings.MassiveAuraEnabled then
-        -- 💥 MASSIVE CROWD WIPEOUT: Hits all targets in radius simultaneously!
         for _, t in ipairs(targets) do
             if isBatEquipped and BatSwingRemote then
                 BatSwingRemote:FireServer(t.part)
@@ -220,7 +258,6 @@ local function executeCombatCycle()
             end)
         end
     else
-        -- Single nearest target
         local t = targets[1]
         if isBatEquipped and BatSwingRemote then
             BatSwingRemote:FireServer(t.part)
@@ -244,7 +281,7 @@ RunService.Heartbeat:Connect(function()
 end)
 
 -- ========================================================================
--- RADIUS VISUALIZER (Neon Ground Cylinder)
+-- 6. RADIUS VISUALIZER (Neon Ground Cylinder)
 -- ========================================================================
 local VisualizerPart = Instance.new("Part")
 VisualizerPart.Name = "NyxAuraVisualizer"
@@ -278,7 +315,7 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ========================================================================
--- 👁️ COMPACT ESP SYSTEM (Loot & NPCs)
+-- 7. 👁️ COMPACT ESP SYSTEM (Loot & NPCs)
 -- ========================================================================
 local ActiveLootEsp = setmetatable({}, {__mode = "k"})
 local ActiveNpcEsp = setmetatable({}, {__mode = "k"})
@@ -294,15 +331,15 @@ local function createLootBillboard(item)
     local bg = Instance.new("BillboardGui")
     bg.Name = "LootESP_" .. item.Name
     bg.Adornee = prim
-    bg.Size = UDim2.fromOffset(82, 22)
+    bg.Size = UDim2.fromOffset(84, 22)
     bg.AlwaysOnTop = true
     bg.MaxDistance = Settings.LootEspMaxDist
     bg.ExtentsOffset = Vector3.new(0, 0.9, 0)
 
     local card = Instance.new("Frame")
     card.Size = UDim2.fromScale(1, 1)
-    card.BackgroundColor3 = Color3.fromRGB(12, 15, 22)
-    card.BackgroundTransparency = 0.3
+    card.BackgroundColor3 = Color3.fromRGB(11, 14, 20)
+    card.BackgroundTransparency = 0.25
     card.BorderSizePixel = 0
     card.Parent = bg
     Instance.new("UICorner", card).CornerRadius = UDim.new(0, 5)
@@ -310,7 +347,7 @@ local function createLootBillboard(item)
     local stroke = Instance.new("UIStroke", card)
     stroke.Thickness = 1
     stroke.Color = (weight >= 2) and Color3.fromRGB(255, 170, 0) or Color3.fromRGB(0, 210, 255)
-    stroke.Transparency = 0.5
+    stroke.Transparency = 0.45
 
     local label = Instance.new("TextLabel")
     label.Size = UDim2.fromScale(1, 1)
@@ -340,8 +377,8 @@ local function createNpcBillboard(npc, tag)
 
     local card = Instance.new("Frame")
     card.Size = UDim2.fromScale(1, 1)
-    card.BackgroundColor3 = Color3.fromRGB(15, 18, 26)
-    card.BackgroundTransparency = 0.3
+    card.BackgroundColor3 = Color3.fromRGB(11, 14, 20)
+    card.BackgroundTransparency = 0.25
     card.BorderSizePixel = 0
     card.Parent = bg
     Instance.new("UICorner", card).CornerRadius = UDim.new(0, 5)
@@ -355,7 +392,7 @@ local function createNpcBillboard(npc, tag)
     local stroke = Instance.new("UIStroke", card)
     stroke.Thickness = 1
     stroke.Color = col
-    stroke.Transparency = 0.4
+    stroke.Transparency = 0.45
 
     local label = Instance.new("TextLabel")
     label.Name = "Label"
@@ -382,7 +419,6 @@ RunService.Heartbeat:Connect(function()
     local myPos = hrp and hrp.Position or Vector3.zero
     local serverTime = workspace:GetServerTimeNow()
 
-    -- 1. LOOT ESP
     if Settings.LootEspEnabled and hrp then
         local lootFolder = workspace:FindFirstChild("Loot")
         if lootFolder then
@@ -410,7 +446,6 @@ RunService.Heartbeat:Connect(function()
         end
     end
 
-    -- 2. NPC ESP
     if Settings.NpcEspEnabled and hrp then
         for _, tag in ipairs(CombatTags) do
             for _, npc in ipairs(CollectionService:GetTagged(tag)) do
@@ -454,7 +489,7 @@ RunService.Heartbeat:Connect(function()
 end)
 
 -- ========================================================================
--- ⚡ AUTO-FARM LEVEL / EXP (Grab & Drop Cycle)
+-- 8. ⚡ AUTO-FARM LEVEL / EXP (Grab & Drop Cycle)
 -- ========================================================================
 local function executeAutoFarmXpStep()
     local char = LocalPlayer.Character
@@ -500,7 +535,7 @@ LocalPlayer:GetAttributeChangedSignal("XP"):Connect(function()
 end)
 
 -- ========================================================================
--- 🛡️ SAFE UNLOAD & TRUCK ACTIONS (Weapons / Tools NEVER Dropped!)
+-- 9. 🛡️ SAFE UNLOAD & TRUCK ACTIONS (Weapons / Tools NEVER Dropped!)
 -- ========================================================================
 local function triggerPrompt(prompt)
     if not prompt or not prompt.Parent then return false end
@@ -559,7 +594,6 @@ local function getNearestDepositZone()
     return bestZone, bestDist
 end
 
--- 🛡️ SAFE UNLOAD: Only drops loot with ShopId == nil (Bat, Pistol, etc. 100% PROTECTED)
 local function unloadInventoryToTrunk()
     if State.IsUnloading then return end
     State.IsUnloading = true
@@ -639,7 +673,6 @@ local function unloadInventoryToTrunk()
     local droppedCount = 0
 
     for _, lootItem in ipairs(stashed) do
-        -- Double check: never equip or drop weapons/tools!
         if lootItem and lootItem.Parent and not lootItem:GetAttribute("ShopId") then
             hum:EquipTool(lootItem)
             task.wait(0.06)
@@ -846,7 +879,60 @@ local function manualPullSellLever()
 end
 
 -- ========================================================================
--- 💎 USER INTERFACE (Glassmorphism with Tabs & Interactive Binds)
+-- 10. 🛒 REMOTE SHOP PURCHASER (Buy Any Upgrade from Anywhere!)
+-- ========================================================================
+local function buyRemoteShopItem(itemId)
+    if not ShopBuyRemote then
+        notifyUser("Shop remote not found!", Color3.fromRGB(255, 90, 90))
+        return
+    end
+
+    local char = LocalPlayer.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- Find nearest truck computer
+    local myPos = hrp.Position
+    local bestComp = nil
+    local bestDist = math.huge
+
+    for _, t in ipairs(CollectionService:GetTagged("TravelTruck")) do
+        local comp = t:FindFirstChild("ShopComputer")
+        if comp then
+            local p = comp:GetPivot().Position
+            local d = (p - myPos).Magnitude
+            if d < bestDist then
+                bestDist = d
+                bestComp = comp
+            end
+        end
+    end
+
+    if not bestComp then
+        notifyUser("No Shop Computer found on map!", Color3.fromRGB(255, 90, 90))
+        return
+    end
+
+    local oldCFrame = hrp.CFrame
+    local desk = bestComp:FindFirstChild("DeskTop") or bestComp:FindFirstChild("Screen") or bestComp.PrimaryPart
+    hrp.CFrame = desk.CFrame + Vector3.new(2, 0, 0)
+    task.wait(0.2)
+
+    local ok, res1, res2 = pcall(function()
+        return ShopBuyRemote:InvokeServer(itemId)
+    end)
+
+    hrp.CFrame = oldCFrame
+
+    if ok and res1 then
+        notifyUser("Purchased: " .. tostring(res2 or itemId) .. "!", Color3.fromRGB(0, 230, 118))
+    else
+        notifyUser(tostring(res2 or "Could not buy item."), Color3.fromRGB(255, 120, 120))
+    end
+end
+
+-- ========================================================================
+-- 11. 💎 REFINED HIGH-END GLASSMORPHISM UI (Tabs, Clean 'X', Styled Switches)
 -- ========================================================================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "NyxCriminalSimGui"
@@ -869,62 +955,72 @@ local function parentGui(gui)
 end
 parentGui(ScreenGui)
 EspFolder.Parent = ScreenGui
-_G.NyxCriminalSimInstance = ScreenGui
 
-ScreenGui.Destroying:Connect(function()
-    if VisualizerPart then VisualizerPart:Destroy() end
-    if EspFolder then EspFolder:Destroy() end
-    _G.NyxCriminalSimInstance = nil
-end)
+-- Register global cleanup
+_G.NyxCriminalSimCleanup = function()
+    pcall(function() ScreenGui:Destroy() end)
+    pcall(function() VisualizerPart:Destroy() end)
+    pcall(function() EspFolder:Destroy() end)
+    pcall(function() LocalPlayer:SetAttribute("Flying", false) end)
+end
 
--- Main Frame Card
+-- Main Card Frame
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainCard"
-MainFrame.Size = UDim2.fromOffset(390, 480)
-MainFrame.Position = UDim2.new(0.5, -195, 0.5, -240)
-MainFrame.BackgroundColor3 = Color3.fromRGB(14, 17, 24)
-MainFrame.BackgroundTransparency = 0.12
+MainFrame.Size = UDim2.fromOffset(410, 510)
+MainFrame.Position = UDim2.new(0.5, -205, 0.5, -255)
+MainFrame.BackgroundColor3 = Color3.fromRGB(12, 15, 22)
+MainFrame.BackgroundTransparency = 0.08
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 
-Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 12)
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 14)
+
 local MainStroke = Instance.new("UIStroke", MainFrame)
 MainStroke.Thickness = 1.5
-MainStroke.Color = Color3.fromRGB(0, 210, 255)
-MainStroke.Transparency = 0.4
+MainStroke.Color = Color3.fromRGB(0, 220, 255)
+MainStroke.Transparency = 0.35
+
+local MainGradient = Instance.new("UIGradient", MainFrame)
+MainGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(18, 22, 34)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(9, 12, 18)),
+})
+MainGradient.Rotation = 45
 
 -- Header Bar
 local Header = Instance.new("Frame")
 Header.Name = "Header"
-Header.Size = UDim2.new(1, 0, 0, 42)
-Header.BackgroundColor3 = Color3.fromRGB(20, 25, 36)
-Header.BackgroundTransparency = 0.3
+Header.Size = UDim2.new(1, 0, 0, 44)
+Header.BackgroundColor3 = Color3.fromRGB(19, 24, 36)
+Header.BackgroundTransparency = 0.35
 Header.BorderSizePixel = 0
 Header.Parent = MainFrame
-Instance.new("UICorner", Header).CornerRadius = UDim.new(0, 12)
+Instance.new("UICorner", Header).CornerRadius = UDim.new(0, 14)
 
 local HeaderTitle = Instance.new("TextLabel")
-HeaderTitle.Size = UDim2.new(1, -70, 1, 0)
-HeaderTitle.Position = UDim2.fromOffset(14, 0)
+HeaderTitle.Size = UDim2.new(1, -75, 1, 0)
+HeaderTitle.Position = UDim2.fromOffset(16, 0)
 HeaderTitle.BackgroundTransparency = 1
 HeaderTitle.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
-HeaderTitle.Text = "⚡ NYX // CRIMINAL SIMULATOR v2.1"
-HeaderTitle.TextColor3 = Color3.fromRGB(240, 245, 255)
+HeaderTitle.Text = "⚡ NYX // CRIMINAL SIMULATOR v2.2"
+HeaderTitle.TextColor3 = Color3.fromRGB(240, 248, 255)
 HeaderTitle.TextSize = 13
 HeaderTitle.TextXAlignment = Enum.TextXAlignment.Left
 HeaderTitle.Parent = Header
 
+-- Window Controls (Fixed Clean ASCII Buttons)
 local MinBtn = Instance.new("TextButton")
 MinBtn.Name = "MinBtn"
 MinBtn.Size = UDim2.fromOffset(26, 26)
-MinBtn.Position = UDim2.new(1, -60, 0, 8)
-MinBtn.BackgroundColor3 = Color3.fromRGB(35, 42, 58)
+MinBtn.Position = UDim2.new(1, -64, 0, 9)
+MinBtn.BackgroundColor3 = Color3.fromRGB(32, 40, 58)
 MinBtn.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
-MinBtn.Text = "—"
-MinBtn.TextColor3 = Color3.fromRGB(220, 230, 245)
-MinBtn.TextSize = 13
+MinBtn.Text = "-"
+MinBtn.TextColor3 = Color3.fromRGB(220, 235, 255)
+MinBtn.TextSize = 15
 MinBtn.AutoButtonColor = false
 MinBtn.Parent = Header
 Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 6)
@@ -932,11 +1028,11 @@ Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 6)
 local CloseBtn = Instance.new("TextButton")
 CloseBtn.Name = "CloseBtn"
 CloseBtn.Size = UDim2.fromOffset(26, 26)
-CloseBtn.Position = UDim2.new(1, -30, 0, 8)
-CloseBtn.BackgroundColor3 = Color3.fromRGB(60, 28, 32)
+CloseBtn.Position = UDim2.new(1, -32, 0, 9)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(65, 26, 32)
 CloseBtn.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
-CloseBtn.Text = "✕"
-CloseBtn.TextColor3 = Color3.fromRGB(255, 120, 120)
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 110, 110)
 CloseBtn.TextSize = 12
 CloseBtn.AutoButtonColor = false
 CloseBtn.Parent = Header
@@ -945,9 +1041,9 @@ Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 6)
 -- Tab Bar
 local TabBar = Instance.new("Frame")
 TabBar.Name = "TabBar"
-TabBar.Size = UDim2.new(1, -20, 0, 32)
-TabBar.Position = UDim2.fromOffset(10, 48)
-TabBar.BackgroundColor3 = Color3.fromRGB(18, 22, 32)
+TabBar.Size = UDim2.new(1, -24, 0, 32)
+TabBar.Position = UDim2.fromOffset(12, 50)
+TabBar.BackgroundColor3 = Color3.fromRGB(16, 20, 30)
 TabBar.BackgroundTransparency = 0.5
 TabBar.BorderSizePixel = 0
 TabBar.Parent = MainFrame
@@ -958,10 +1054,11 @@ TabLayout.FillDirection = Enum.FillDirection.Horizontal
 TabLayout.Padding = UDim.new(0, 4)
 TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
+-- Tab Container Frame
 local TabContainer = Instance.new("Frame")
 TabContainer.Name = "TabContainer"
-TabContainer.Size = UDim2.new(1, -20, 1, -128)
-TabContainer.Position = UDim2.fromOffset(10, 86)
+TabContainer.Size = UDim2.new(1, -24, 1, -134)
+TabContainer.Position = UDim2.fromOffset(12, 88)
 TabContainer.BackgroundTransparency = 1
 TabContainer.BorderSizePixel = 0
 TabContainer.Parent = MainFrame
@@ -971,8 +1068,10 @@ local TabButtons = {}
 
 local TabNames = {
     {id = "Combat", name = "⚔️ Combat"},
+    {id = "Cheats", name = "🚀 Cheats"},
     {id = "Visuals", name = "👁️ ESP"},
     {id = "Misc", name = "🚚 Farm & Loot"},
+    {id = "Shop", name = "🛒 Shop"},
     {id = "Binds", name = "⌨️ Binds"},
 }
 
@@ -986,8 +1085,8 @@ local function switchTab(tabId)
             btn.BackgroundColor3 = Color3.fromRGB(0, 180, 240)
             btn.TextColor3 = Color3.new(1, 1, 1)
         else
-            btn.BackgroundColor3 = Color3.fromRGB(24, 30, 44)
-            btn.TextColor3 = Color3.fromRGB(160, 175, 195)
+            btn.BackgroundColor3 = Color3.fromRGB(22, 28, 42)
+            btn.TextColor3 = Color3.fromRGB(155, 170, 195)
         end
     end
 end
@@ -995,12 +1094,12 @@ end
 for i, tabInfo in ipairs(TabNames) do
     local tabBtn = Instance.new("TextButton")
     tabBtn.Name = "TabBtn_" .. tabInfo.id
-    tabBtn.Size = UDim2.new(0.25, -3, 1, 0)
+    tabBtn.Size = UDim2.new(1 / #TabNames, -3, 1, 0)
     tabBtn.LayoutOrder = i
-    tabBtn.BackgroundColor3 = Color3.fromRGB(24, 30, 44)
+    tabBtn.BackgroundColor3 = Color3.fromRGB(22, 28, 42)
     tabBtn.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
     tabBtn.Text = tabInfo.name
-    tabBtn.TextSize = 11
+    tabBtn.TextSize = 10
     tabBtn.AutoButtonColor = false
     tabBtn.Parent = TabBar
     Instance.new("UICorner", tabBtn).CornerRadius = UDim.new(0, 6)
@@ -1028,6 +1127,9 @@ for i, tabInfo in ipairs(TabNames) do
     TabPages[tabInfo.id] = page
 end
 
+-- ========================================================================
+-- UI BUILDER HELPERS
+-- ========================================================================
 local function addSectionLabel(parent, title, order)
     local lbl = Instance.new("TextLabel")
     lbl.LayoutOrder = order
@@ -1042,19 +1144,24 @@ local function addSectionLabel(parent, title, order)
     return lbl
 end
 
+-- Beautiful Animated Pill Switch Toggle
 local function addToggle(parent, title, defaultVal, order, onToggle)
     local card = Instance.new("Frame")
     card.LayoutOrder = order
     card.Size = UDim2.new(1, 0, 0, 36)
-    card.BackgroundColor3 = Color3.fromRGB(20, 26, 38)
+    card.BackgroundColor3 = Color3.fromRGB(18, 23, 34)
     card.BackgroundTransparency = 0.4
     card.BorderSizePixel = 0
     card.Parent = parent
     Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
 
+    local stroke = Instance.new("UIStroke", card)
+    stroke.Thickness = 1
+    stroke.Color = Color3.fromRGB(35, 45, 65)
+
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, -65, 1, 0)
-    lbl.Position = UDim2.fromOffset(10, 0)
+    lbl.Position = UDim2.fromOffset(12, 0)
     lbl.BackgroundTransparency = 1
     lbl.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Medium)
     lbl.Text = title
@@ -1063,44 +1170,62 @@ local function addToggle(parent, title, defaultVal, order, onToggle)
     lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = card
 
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.fromOffset(48, 24)
-    btn.Position = UDim2.new(1, -56, 0.5, -12)
-    btn.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
-    btn.TextSize = 11
-    btn.AutoButtonColor = false
-    btn.Parent = card
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    -- Pill Switch Frame
+    local switchTrack = Instance.new("TextButton")
+    switchTrack.Size = UDim2.fromOffset(46, 22)
+    switchTrack.Position = UDim2.new(1, -56, 0.5, -11)
+    switchTrack.Text = ""
+    switchTrack.AutoButtonColor = false
+    switchTrack.BackgroundColor3 = defaultVal and Color3.fromRGB(0, 190, 110) or Color3.fromRGB(40, 48, 64)
+    switchTrack.Parent = card
+    Instance.new("UICorner", switchTrack).CornerRadius = UDim.new(1, 0)
+
+    local switchKnob = Instance.new("Frame")
+    switchKnob.Size = UDim2.fromOffset(18, 18)
+    switchKnob.Position = defaultVal and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+    switchKnob.BackgroundColor3 = Color3.new(1, 1, 1)
+    switchKnob.BorderSizePixel = 0
+    switchKnob.Parent = switchTrack
+    Instance.new("UICorner", switchKnob).CornerRadius = UDim.new(1, 0)
 
     local state = defaultVal
-    local function updateUI()
-        btn.Text = state and "ON" or "OFF"
-        btn.BackgroundColor3 = state and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(45, 52, 68)
-        btn.TextColor3 = state and Color3.new(1, 1, 1) or Color3.fromRGB(160, 175, 195)
+    local function updateUI(animate)
+        local targetColor = state and Color3.fromRGB(0, 190, 110) or Color3.fromRGB(40, 48, 64)
+        local targetPos = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+        if animate then
+            TweenService:Create(switchTrack, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {BackgroundColor3 = targetColor}):Play()
+            TweenService:Create(switchKnob, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {Position = targetPos}):Play()
+        else
+            switchTrack.BackgroundColor3 = targetColor
+            switchKnob.Position = targetPos
+        end
     end
-    updateUI()
 
-    btn.MouseButton1Click:Connect(function()
+    switchTrack.MouseButton1Click:Connect(function()
         state = not state
-        updateUI()
+        updateUI(true)
         onToggle(state)
     end)
-    return card, function(newVal) state = newVal updateUI() end
+    return card, function(newVal) state = newVal updateUI(true) end
 end
 
 local function addSlider(parent, title, minVal, maxVal, curVal, unit, order, onSlide)
     local card = Instance.new("Frame")
     card.LayoutOrder = order
     card.Size = UDim2.new(1, 0, 0, 48)
-    card.BackgroundColor3 = Color3.fromRGB(20, 26, 38)
+    card.BackgroundColor3 = Color3.fromRGB(18, 23, 34)
     card.BackgroundTransparency = 0.4
     card.BorderSizePixel = 0
     card.Parent = parent
     Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
 
+    local stroke = Instance.new("UIStroke", card)
+    stroke.Thickness = 1
+    stroke.Color = Color3.fromRGB(35, 45, 65)
+
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, -75, 0, 20)
-    lbl.Position = UDim2.fromOffset(10, 4)
+    lbl.Position = UDim2.fromOffset(12, 4)
     lbl.BackgroundTransparency = 1
     lbl.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Medium)
     lbl.Text = title
@@ -1121,9 +1246,9 @@ local function addSlider(parent, title, minVal, maxVal, curVal, unit, order, onS
     valLbl.Parent = card
 
     local bar = Instance.new("Frame")
-    bar.Size = UDim2.new(1, -20, 0, 6)
-    bar.Position = UDim2.fromOffset(10, 30)
-    bar.BackgroundColor3 = Color3.fromRGB(40, 48, 65)
+    bar.Size = UDim2.new(1, -24, 0, 6)
+    bar.Position = UDim2.fromOffset(12, 30)
+    bar.BackgroundColor3 = Color3.fromRGB(36, 44, 60)
     bar.BorderSizePixel = 0
     bar.Parent = card
     Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
@@ -1163,19 +1288,23 @@ local function addSlider(parent, title, minVal, maxVal, curVal, unit, order, onS
     return card
 end
 
-local function addActionBtn(parent, title, subtitle, btnColor, order, onClick)
+local function addActionBtn(parent, title, subtitle, btnText, btnColor, order, onClick)
     local card = Instance.new("Frame")
     card.LayoutOrder = order
     card.Size = UDim2.new(1, 0, 0, 44)
-    card.BackgroundColor3 = Color3.fromRGB(20, 26, 38)
+    card.BackgroundColor3 = Color3.fromRGB(18, 23, 34)
     card.BackgroundTransparency = 0.4
     card.BorderSizePixel = 0
     card.Parent = parent
     Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
 
+    local stroke = Instance.new("UIStroke", card)
+    stroke.Thickness = 1
+    stroke.Color = Color3.fromRGB(35, 45, 65)
+
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, -100, 0, 20)
-    lbl.Position = UDim2.fromOffset(10, 4)
+    lbl.Position = UDim2.fromOffset(12, 4)
     lbl.BackgroundTransparency = 1
     lbl.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
     lbl.Text = title
@@ -1186,7 +1315,7 @@ local function addActionBtn(parent, title, subtitle, btnColor, order, onClick)
 
     local sub = Instance.new("TextLabel")
     sub.Size = UDim2.new(1, -100, 0, 16)
-    sub.Position = UDim2.fromOffset(10, 22)
+    sub.Position = UDim2.fromOffset(12, 22)
     sub.BackgroundTransparency = 1
     sub.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Regular)
     sub.Text = subtitle
@@ -1200,7 +1329,7 @@ local function addActionBtn(parent, title, subtitle, btnColor, order, onClick)
     btn.Position = UDim2.new(1, -90, 0.5, -14)
     btn.BackgroundColor3 = btnColor or Color3.fromRGB(0, 150, 255)
     btn.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
-    btn.Text = "RUN"
+    btn.Text = btnText or "RUN"
     btn.TextColor3 = Color3.new(1, 1, 1)
     btn.TextSize = 11
     btn.AutoButtonColor = false
@@ -1208,10 +1337,11 @@ local function addActionBtn(parent, title, subtitle, btnColor, order, onClick)
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
 
     btn.MouseButton1Click:Connect(function()
+        local orig = btn.Text
         btn.Text = "..."
         task.spawn(function()
             onClick()
-            btn.Text = "RUN"
+            btn.Text = orig
         end)
     end)
     return card
@@ -1223,12 +1353,12 @@ end
 local combatPage = TabPages["Combat"]
 addSectionLabel(combatPage, "KNOCKOUT AURA CONTROLS", 1)
 
-addToggle(combatPage, "Kill Aura (Bat / Fists)", Settings.KillAuraEnabled, 2, function(val)
+local _, setAuraToggle = addToggle(combatPage, "Kill Aura (Bat / Fists)", Settings.KillAuraEnabled, 2, function(val)
     Settings.KillAuraEnabled = val
     notifyUser("Kill Aura: " .. (val and "ACTIVE" or "OFF"), val and Color3.fromRGB(0, 230, 118) or Color3.fromRGB(255, 120, 120))
 end)
 
-addToggle(combatPage, "💥 Massive Crowd Wipe (Multi-Hit)", Settings.MassiveAuraEnabled, 3, function(val)
+local _, setMassiveToggle = addToggle(combatPage, "💥 Massive Crowd Wipe (Multi-Hit)", Settings.MassiveAuraEnabled, 3, function(val)
     Settings.MassiveAuraEnabled = val
     notifyUser("Massive Crowd Wipe: " .. (val and "ON (Simultaneous)" or "OFF (Single Target)"), Color3.fromRGB(0, 210, 255))
 end)
@@ -1245,25 +1375,34 @@ addSlider(combatPage, "Attack Delay (Lower = Faster)", 1, 8, math.floor(Settings
     Settings.AttackCooldown = val * 0.1
 end)
 
-addSectionLabel(combatPage, "MOVEMENT & VEHICLE CHEATS", 7)
-addToggle(combatPage, "🏃 Infinite Stamina (Sprint Forever)", Settings.InfiniteStamina, 8, function(val)
+addSectionLabel(combatPage, "TARGET FILTERING", 7)
+addToggle(combatPage, "Target Police / Cops", Settings.TargetPolice, 8, function(val) Settings.TargetPolice = val end)
+addToggle(combatPage, "Target Security Guards", Settings.TargetGuards, 9, function(val) Settings.TargetGuards = val end)
+addToggle(combatPage, "Target Police Dogs", Settings.TargetDogs, 10, function(val) Settings.TargetDogs = val end)
+addToggle(combatPage, "Target House Residents", Settings.TargetResidents, 11, function(val) Settings.TargetResidents = val end)
+
+-- ========================================================================
+-- TAB 2: 🚀 MOVEMENT & CHEATS TAB
+-- ========================================================================
+local cheatsPage = TabPages["Cheats"]
+addSectionLabel(cheatsPage, "MOVEMENT & GODMODE", 1)
+
+local _, setFlyToggle = addToggle(cheatsPage, "🕊️ Fly Hack (WASD+Space+Ctrl)", Settings.FlyEnabled, 2, function(val)
+    setFlyState(val)
+end)
+
+addToggle(cheatsPage, "🏃 Infinite Stamina (Sprint Forever)", Settings.InfiniteStamina, 3, function(val)
     Settings.InfiniteStamina = val
     notifyUser("Infinite Stamina: " .. (val and "ACTIVE" or "OFF"), val and Color3.fromRGB(0, 230, 118) or Color3.fromRGB(255, 120, 120))
 end)
 
-addToggle(combatPage, "⛽ Infinite Car Fuel (Lock Gas 100%)", Settings.InfiniteFuel, 9, function(val)
+addToggle(cheatsPage, "⛽ Infinite Car Fuel (Lock Gas 100%)", Settings.InfiniteFuel, 4, function(val)
     Settings.InfiniteFuel = val
     notifyUser("Infinite Car Fuel: " .. (val and "ACTIVE" or "OFF"), val and Color3.fromRGB(0, 230, 118) or Color3.fromRGB(255, 120, 120))
 end)
 
-addSectionLabel(combatPage, "TARGET FILTERING", 10)
-addToggle(combatPage, "Target Police / Cops", Settings.TargetPolice, 11, function(val) Settings.TargetPolice = val end)
-addToggle(combatPage, "Target Security Guards", Settings.TargetGuards, 12, function(val) Settings.TargetGuards = val end)
-addToggle(combatPage, "Target Police Dogs", Settings.TargetDogs, 13, function(val) Settings.TargetDogs = val end)
-addToggle(combatPage, "Target House Residents", Settings.TargetResidents, 14, function(val) Settings.TargetResidents = val end)
-
 -- ========================================================================
--- TAB 2: 👁️ VISUALS / ESP TAB
+-- TAB 3: 👁️ VISUALS / ESP TAB
 -- ========================================================================
 local visualsPage = TabPages["Visuals"]
 addSectionLabel(visualsPage, "LOOT ITEM ESP (COMPACT)", 1)
@@ -1295,26 +1434,26 @@ addSlider(visualsPage, "NPC Max Render Distance", 20, 150, Settings.NpcEspMaxDis
 end)
 
 -- ========================================================================
--- TAB 3: 🚚 LOOT, FARM & HIDEOUT TAB
+-- TAB 4: 🚚 LOOT & FARM TAB
 -- ========================================================================
 local miscPage = TabPages["Misc"]
 addSectionLabel(miscPage, "TRUNK & LOOT AUTOMATION", 1)
 
-addActionBtn(miscPage, "Unload Stash to Trunk", "Dumps loot into trunk (keeps tools safe)", Color3.fromRGB(0, 160, 230), 2, function()
+addActionBtn(miscPage, "Unload Stash to Trunk", "Dumps loot into trunk (keeps tools safe)", "UNLOAD", Color3.fromRGB(0, 160, 230), 2, function()
     unloadInventoryToTrunk()
 end)
 
-addActionBtn(miscPage, "Load Heavy Items to Trunk", "Loads nearby loose TVs/Computers into van", Color3.fromRGB(110, 120, 240), 3, function()
+addActionBtn(miscPage, "Load Heavy Items to Trunk", "Loads nearby loose TVs/Computers into van", "GRAB", Color3.fromRGB(110, 120, 240), 3, function()
     loadNearbyHeavyToTrunk()
 end)
 
 addSectionLabel(miscPage, "HIDEOUT SELLING", 4)
 
-addActionBtn(miscPage, "Auto-Sell Truck Cargo", "Truck cargo -> SellBox -> pulls Lever", Color3.fromRGB(0, 190, 110), 5, function()
+addActionBtn(miscPage, "Auto-Sell Truck Cargo", "Truck cargo -> SellBox -> pulls Lever", "SELL ALL", Color3.fromRGB(0, 190, 110), 5, function()
     autoSellTruckCargo()
 end)
 
-addActionBtn(miscPage, "Pull Sell Lever", "Manually activates Hideout Sell Lever", Color3.fromRGB(220, 150, 40), 6, function()
+addActionBtn(miscPage, "Pull Sell Lever", "Manually activates Hideout Sell Lever", "PULL", Color3.fromRGB(220, 150, 40), 6, function()
     manualPullSellLever()
 end)
 
@@ -1333,7 +1472,7 @@ end)
 local XpCard = Instance.new("Frame")
 XpCard.LayoutOrder = 10
 XpCard.Size = UDim2.new(1, 0, 0, 46)
-XpCard.BackgroundColor3 = Color3.fromRGB(20, 26, 38)
+XpCard.BackgroundColor3 = Color3.fromRGB(18, 23, 34)
 XpCard.BackgroundTransparency = 0.4
 XpCard.BorderSizePixel = 0
 XpCard.Parent = miscPage
@@ -1353,14 +1492,54 @@ XpLabel.Parent = XpCard
 local function updateXpCard()
     local lvl = LocalPlayer:GetAttribute("Level") or 1
     local totalXp = LocalPlayer:GetAttribute("XP") or 0
-    XpLabel.Text = string.format("Level: <font color=\"#00d2ff\">%d</font>  ·  XP: <font color=\"#00e676\">%d</font>  ·  Session Gain: <font color=\"#ffaa00\">+%d XP</font>", lvl, totalXp, State.SessionXpGained)
+    XpLabel.Text = string.format("Level: <font color=\"#00d2ff\">%d</font>  ·  XP: <font color=\"#00e676\">%d</font>  ·  Session: <font color=\"#ffaa00\">+%d XP</font>", lvl, totalXp, State.SessionXpGained)
 end
 updateXpCard()
 LocalPlayer:GetAttributeChangedSignal("XP"):Connect(updateXpCard)
 LocalPlayer:GetAttributeChangedSignal("Level"):Connect(updateXpCard)
 
 -- ========================================================================
--- TAB 4: ⌨️ INTERACTIVE KEYBINDS TAB
+-- TAB 5: 🛒 REMOTE SHOP TAB
+-- ========================================================================
+local shopPage = TabPages["Shop"]
+addSectionLabel(shopPage, "ONE-CLICK REMOTE PURCHASES", 1)
+
+addActionBtn(shopPage, "Buy Lifter Upgrade", "Increases max carry weight (lifts TVs/PCs!)", "BUY ($)", Color3.fromRGB(0, 190, 110), 2, function()
+    buyRemoteShopItem("Lifter")
+end)
+
+addActionBtn(shopPage, "Buy Running Shoes", "Increases sprint and movement speed", "BUY ($)", Color3.fromRGB(0, 180, 230), 3, function()
+    buyRemoteShopItem("RunningShoes")
+end)
+
+addActionBtn(shopPage, "Buy Lung Capacity", "Expands stamina bar pool", "BUY ($)", Color3.fromRGB(0, 180, 230), 4, function()
+    buyRemoteShopItem("LungCapacity")
+end)
+
+addActionBtn(shopPage, "Buy Hotbar Slots (Pockets)", "Unlocks extra hotbar inventory slots", "BUY ($)", Color3.fromRGB(110, 120, 240), 5, function()
+    buyRemoteShopItem("Pockets")
+end)
+
+addSectionLabel(shopPage, "TOOLS & GEAR", 6)
+
+addActionBtn(shopPage, "Buy Lockpick", "Picks house front doors quietly", "BUY ($)", Color3.fromRGB(220, 150, 40), 7, function()
+    buyRemoteShopItem("Lockpick")
+end)
+
+addActionBtn(shopPage, "Buy Glass Cutter", "Quietly cuts window glass", "BUY ($)", Color3.fromRGB(220, 150, 40), 8, function()
+    buyRemoteShopItem("GlassCutter")
+end)
+
+addActionBtn(shopPage, "Buy Remote Hacker", "Disables mansion alarms from distance", "BUY ($)", Color3.fromRGB(180, 80, 240), 9, function()
+    buyRemoteShopItem("RemoteHacker")
+end)
+
+addActionBtn(shopPage, "Buy Blowtorch", "Burns into heavy basement safes", "BUY ($)", Color3.fromRGB(240, 80, 60), 10, function()
+    buyRemoteShopItem("Blowtorch")
+end)
+
+-- ========================================================================
+-- TAB 6: ⌨️ INTERACTIVE KEYBINDS TAB
 -- ========================================================================
 local bindsPage = TabPages["Binds"]
 addSectionLabel(bindsPage, "CUSTOM KEYBIND REMAPPING", 1)
@@ -1371,6 +1550,7 @@ local BindList = {
     {key = "ToggleUI", name = "Toggle Menu Visibility", default = Enum.KeyCode.RightShift},
     {key = "KillAura", name = "Toggle Kill Aura", default = Enum.KeyCode.X},
     {key = "MassiveAura", name = "Toggle Massive Mode", default = Enum.KeyCode.Z},
+    {key = "Fly", name = "Toggle Fly Hack", default = Enum.KeyCode.F},
     {key = "UnloadStash", name = "Unload Stash to Trunk", default = Enum.KeyCode.U},
     {key = "LoadHeavy", name = "Load Heavy to Trunk", default = Enum.KeyCode.H},
     {key = "AutoSell", name = "Auto-Sell Truck Cargo", default = Enum.KeyCode.J},
@@ -1383,15 +1563,19 @@ for i, bindInfo in ipairs(BindList) do
     local card = Instance.new("Frame")
     card.LayoutOrder = i + 1
     card.Size = UDim2.new(1, 0, 0, 36)
-    card.BackgroundColor3 = Color3.fromRGB(20, 26, 38)
+    card.BackgroundColor3 = Color3.fromRGB(18, 23, 34)
     card.BackgroundTransparency = 0.4
     card.BorderSizePixel = 0
     card.Parent = bindsPage
     Instance.new("UICorner", card).CornerRadius = UDim.new(0, 8)
 
+    local stroke = Instance.new("UIStroke", card)
+    stroke.Thickness = 1
+    stroke.Color = Color3.fromRGB(35, 45, 65)
+
     local lbl = Instance.new("TextLabel")
     lbl.Size = UDim2.new(1, -95, 1, 0)
-    lbl.Position = UDim2.fromOffset(10, 0)
+    lbl.Position = UDim2.fromOffset(12, 0)
     lbl.BackgroundTransparency = 1
     lbl.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Medium)
     lbl.Text = bindInfo.name
@@ -1403,7 +1587,7 @@ for i, bindInfo in ipairs(BindList) do
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.fromOffset(80, 24)
     btn.Position = UDim2.new(1, -88, 0.5, -12)
-    btn.BackgroundColor3 = Color3.fromRGB(35, 42, 58)
+    btn.BackgroundColor3 = Color3.fromRGB(32, 40, 58)
     btn.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
     btn.Text = Settings.Keybinds[bindInfo.key] and Settings.Keybinds[bindInfo.key].Name or "None"
     btn.TextColor3 = Color3.fromRGB(0, 210, 255)
@@ -1458,10 +1642,15 @@ UserInputService.InputBegan:Connect(function(input, gpe)
         MainFrame.Visible = not MainFrame.Visible
     elseif k == Settings.Keybinds.KillAura then
         Settings.KillAuraEnabled = not Settings.KillAuraEnabled
+        setAuraToggle(Settings.KillAuraEnabled)
         notifyUser("Kill Aura: " .. (Settings.KillAuraEnabled and "ON" or "OFF"), Settings.KillAuraEnabled and Color3.fromRGB(0, 230, 118) or Color3.fromRGB(255, 120, 120))
     elseif k == Settings.Keybinds.MassiveAura then
         Settings.MassiveAuraEnabled = not Settings.MassiveAuraEnabled
+        setMassiveToggle(Settings.MassiveAuraEnabled)
         notifyUser("Massive Mode: " .. (Settings.MassiveAuraEnabled and "ON" or "OFF"), Color3.fromRGB(0, 210, 255))
+    elseif k == Settings.Keybinds.Fly then
+        setFlyState(not Settings.FlyEnabled)
+        setFlyToggle(Settings.FlyEnabled)
     elseif k == Settings.Keybinds.UnloadStash then
         unloadInventoryToTrunk()
     elseif k == Settings.Keybinds.LoadHeavy then
@@ -1485,9 +1674,9 @@ end)
 -- ========================================================================
 local Footer = Instance.new("Frame")
 Footer.Name = "Footer"
-Footer.Size = UDim2.new(1, -20, 0, 30)
-Footer.Position = UDim2.new(0, 10, 1, -36)
-Footer.BackgroundColor3 = Color3.fromRGB(18, 22, 32)
+Footer.Size = UDim2.new(1, -24, 0, 30)
+Footer.Position = UDim2.new(0, 12, 1, -38)
+Footer.BackgroundColor3 = Color3.fromRGB(16, 20, 30)
 Footer.BackgroundTransparency = 0.5
 Footer.BorderSizePixel = 0
 Footer.Parent = MainFrame
@@ -1516,9 +1705,7 @@ notifyUser = function(msg, color)
     end)
 end
 
--- ========================================================================
--- MINIMIZE & MOBILE FLOATING TOGGLE
--- ========================================================================
+-- Minimize & Close
 local isMinimized = false
 MinBtn.MouseButton1Click:Connect(function()
     isMinimized = not isMinimized
@@ -1526,19 +1713,19 @@ MinBtn.MouseButton1Click:Connect(function()
         TabBar.Visible = false
         TabContainer.Visible = false
         Footer.Visible = false
-        MainFrame.Size = UDim2.fromOffset(390, 42)
+        MainFrame.Size = UDim2.fromOffset(410, 44)
         MinBtn.Text = "+"
     else
         TabBar.Visible = true
         TabContainer.Visible = true
         Footer.Visible = true
-        MainFrame.Size = UDim2.fromOffset(390, 480)
-        MinBtn.Text = "—"
+        MainFrame.Size = UDim2.fromOffset(410, 510)
+        MinBtn.Text = "-"
     end
 end)
 
 CloseBtn.MouseButton1Click:Connect(function()
-    ScreenGui:Destroy()
+    _G.NyxCriminalSimCleanup()
 end)
 
 -- Mobile Floating Pill Button
@@ -1547,7 +1734,7 @@ MobilePill.Name = "NyxMobileToggle"
 MobilePill.Size = UDim2.fromOffset(46, 46)
 MobilePill.Position = UDim2.new(0, 18, 0.5, -23)
 MobilePill.BackgroundColor3 = Color3.fromRGB(16, 20, 30)
-MobilePill.BackgroundTransparency = 0.25
+MobilePill.BackgroundTransparency = 0.2
 MobilePill.FontFace = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold)
 MobilePill.Text = "⚡"
 MobilePill.TextColor3 = Color3.fromRGB(0, 210, 255)
@@ -1565,6 +1752,6 @@ MobilePill.MouseButton1Click:Connect(function()
     MainFrame.Visible = not MainFrame.Visible
 end)
 
--- Initialize Default Tab
+-- Default Tab
 switchTab("Combat")
-notifyUser("Nyx Criminal Simulator v2.1 Loaded!", Color3.fromRGB(0, 230, 118))
+notifyUser("Nyx Criminal Simulator v2.2 Loaded!", Color3.fromRGB(0, 230, 118))
